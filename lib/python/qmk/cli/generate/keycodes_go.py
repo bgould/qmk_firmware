@@ -36,16 +36,29 @@ def _render_label(label):
     return label
 
 
+def _define_to_gocase(define):
+    return define.lower().title().replace('_', '')
+
+
+def _key_constant_go(define):
+    temp = define
+    if temp.startswith("KC_"):
+        temp = temp[3:]
+    if "0123456789".find(temp) > -1:
+        temp = "N" + temp
+    return temp
+
+
 def _generate_ranges(lines, keycodes):
     lines.append('')
     lines.append('const (')
-    lines.append('// Ranges')
+    lines.append('\t// Ranges')
     for key, value in keycodes["ranges"].items():
         lo, mask = map(lambda x: int(x, 16), key.split("/"))
         hi = lo + mask
         define = value.get("define")
-        lines.append(f'    {define.ljust(30)} = 0x{lo:04X}')
-        lines.append(f'    {(define + "_MAX").ljust(30)} = 0x{hi:04X}')
+        lines.append(f'\t{define.ljust(30)} = 0x{lo:04X}')
+        lines.append(f'\t{(define + "_MAX").ljust(30)} = 0x{hi:04X}')
     lines.append(')')
 
 
@@ -54,25 +67,27 @@ def _generate_defines(lines, keycodes):
     lines.append('const(')
     lines.append('\t// Keycodes')
     for key, value in keycodes["keycodes"].items():
-        temp = value.get("key")
-        if temp.startswith("KC_"):
-            temp = temp[3:]
-        if "0123456789".find(temp) > -1:
-            temp = "N" + temp
-        lines.append(f'\t{temp} keycodes.Keycode = {key}')
+        const = _key_constant_go(value.get("key"))
+        # temp = value.get("key")
+        # if temp.startswith("KC_"):
+        #     temp = temp[3:]
+        # if "0123456789".find(temp) > -1:
+        #     temp = "N" + temp
+        lines.append(f'\t{const} Keycode = {key}')
 
     lines.append('')
     lines.append('\t// Alias')
     for key, value in keycodes["keycodes"].items():
-        temp = value.get("key")
-        if temp.startswith("KC_"):
-            temp = temp[3:]
-        if "0123456789".find(temp) > -1:
-            temp = "N" + temp
+        const = _key_constant_go(value.get("key"))
+        # temp = value.get("key")
+        # if temp.startswith("KC_"):
+        #     temp = temp[3:]
+        # if "0123456789".find(temp) > -1:
+        #     temp = "N" + temp
         for alias in value.get("aliases", []):
             if alias.startswith("KC_"):
                 alias = alias[3:]
-            lines.append(f'\t{alias.ljust(10)} keycodes.Keycode = {temp}')
+            lines.append(f'\t{alias.ljust(10)} Keycode = {const}')
 
     lines.append(')')
 
@@ -82,7 +97,9 @@ def _generate_helpers(lines, keycodes):
     lines.append('// Range Helpers')
     for value in keycodes["ranges"].values():
         define = value.get("define")
-        lines.append(f'// #define IS_{define}(code) ((code) >= {define} && (code) <= {define + "_MAX"})')
+        lines.append(f'func Is{_define_to_gocase(define)}(code Keycode) bool ' + '{')
+        lines.append(f'  return ((code) >= {define} && (code) <= {define + "_MAX"})')
+        lines.append('}\n')
 
     # extract min/max
     temp = {}
@@ -104,6 +121,9 @@ def _generate_helpers(lines, keycodes):
         lo = keycodes["keycodes"][f'0x{codes[0]:04X}']['key']
         hi = keycodes["keycodes"][f'0x{codes[1]:04X}']['key']
         lines.append(f'// #define IS_{ _translate_group(group).upper() }_KEYCODE(code) ((code) >= {lo} && (code) <= {hi})')
+        lines.append(f'func (code Keycode) Is{_define_to_gocase(_translate_group(group).upper())}() bool ' + '{')
+        lines.append(f'  return ((code) >= {_key_constant_go(lo)} && (code) <= {_key_constant_go(hi)})')
+        lines.append('}\n')
 
     # lines.append('')
     # lines.append('// Switch statement Helpers')
@@ -135,6 +155,7 @@ def _generate_aliases(lines, keycodes):
         for alias in value.get("aliases", []):
             lines.append(f'// #define {alias} {value.get("key")}')
 
+
 @cli.argument('-v', '--version', arg_only=True, required=True, help='Version of keycodes to generate.')
 @cli.argument('-o', '--output', arg_only=True, type=normpath, help='File to write to')
 @cli.argument('-q', '--quiet', arg_only=True, action='store_true', help="Quiet mode, only output error messages")
@@ -145,19 +166,19 @@ def generate_keycodes_go(cli):
 
     # Build the keycodes.h file.
     keycodes_h_lines = [
-        '// This file is auto-generated, do not edit.\n',
+        '//go:build !keycodes.alt\n',
         GPL2_HEADER_C_LIKE,
         'package keycodes',
-        'import "github.com/bgould/keyboard-firmware/keyboard/keycodes"',
+        '// This file is auto-generated, do not edit.\n',
+        # 'import "github.com/bgould/keyboard-firmware/keyboard/keycodes"',
     ]
 
     keycodes = load_spec(cli.args.version)
 
-    _generate_ranges(keycodes_h_lines, keycodes)
     _generate_defines(keycodes_h_lines, keycodes)
     _generate_helpers(keycodes_h_lines, keycodes)
+    _generate_ranges(keycodes_h_lines, keycodes)
 
     # Show the results
     dump_lines(cli.args.output, keycodes_h_lines, cli.args.quiet)
-
 
